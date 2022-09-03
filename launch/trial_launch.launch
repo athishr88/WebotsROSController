@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Simple publisher starting-->
+  <env name="LD_LIBRARY_PATH" value="$(env LD_LIBRARY_PATH):$(env WEBOTS_HOME)/lib/controller"/>
+  <env name="PYTHONPATH" value="$(env PYTHONPATH):$(env WEBOTS_HOME)/lib/controller/python38"/>
+  <node name="trial" pkg="trial1_webots" type="webots_launch.py" output="screen"/>
+  <node name="controller" pkg="trial1_webots" type="controller_for_moose.py" output="screen"/>
+</launch>
