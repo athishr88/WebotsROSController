@@ -1,4 +1,5 @@
 #!/usr/bin/env python3.8
+
 # license removed for brevity
 import rospy
 from std_msgs.msg import String
@@ -6,38 +7,33 @@ import os
 from potential_field import APF
 import math
 import numpy as np
-from setuptools import setup
-from catkin_pkg.python_setup import generate_distutils_setup
-
-# os.environ['LD_LIBRARY_PATH'] = "/usr/local/webots/lib/controller"
-# os.environ['PYTHONPATH'] = "/usr/local/webots/lib/controller/python38"
-
 from controller import Robot, Camera, Lidar, GPS, Compass, Motor, Keyboard
 
 class ControllerProgram():
     """
     This is the object that provides feedback about the 
-    robot traversing world 
+    robot traversing world.
+
+    Assumptions:
+    The autopilot traverse path by default takes the value given in "traverse_path" 
+    attribute of the object. 
     """
-    def __init__(self):
+    def __init__(self, talker):
         # Variables
         self.DISTANCE_TOLERANCE = .5
         self.TARGET_POINTS_SIZE = 13
         self.speeds = [0.0, 0.0]
         self.MAX_SPEED = 7.0
         self.TURN_COEFFICIENT = 4.0
+        self.talker =talker
 
         # Misc variables
         self.AUTOPILOT = True
         self.OLD_AUTOPILOT = True
         self.old_key = -1
-        self.traverse_path =[ (-4.209318, 9.147717),   (0.946812, 9.404304),
-                            (0.175989, -1.784311), (-2.805353, -8.829694),  
-                            (-3.846730, -15.602851),(-4.394915, -24.550777),
-                            (-1.701877, -33.617226), (-4.394915, -24.550777),
-                            (-3.846730, -15.602851), (-2.805353, -8.829694),
-                            (0.175989, -1.784311),   (0.946812, 9.404304),
-                            (-7.930821, 6.421292)]
+        self.traverse_path =[[7.26, 1.84], [1.84, 9.09], [-2.79, 13.19], [5.00, 15.09]]
+
+        self.current_target_index = 0
  
 
         # creating instance of devices
@@ -64,6 +60,7 @@ class ControllerProgram():
         self.gps.enable(self.timestep)
         self.compass.enable(self.timestep)
         self.keyboard.enable(self.timestep)
+        rospy.loginfo("Controller started")
     
     def robot_set_speed(self, left, right):
         i = 0
@@ -87,23 +84,20 @@ class ControllerProgram():
         return r
 
     def autopilot_mode(self):
-        rospy.loginfo("Autopilot mode started")
         self.speeds = [0.0, 0.0]
         position_3d = self.gps.getValues()
         north_3d = self.compass.getValues()
         position = [position_3d[0], position_3d[1]]
         
         #compute the direction and the distance to the target
-        direction = self.minus(self.traverse_path[current_target_index], position)
+        direction = self.minus(self.traverse_path[self.current_target_index], position)
         distance = np.linalg.norm(direction)
         direction /= distance
-        
         # compute the error angle
         robot_angle = math.atan2(north_3d[0], north_3d[1])
         target_angle = math.atan2(direction[1], direction[0])
         beta = self.modulus_double(target_angle - robot_angle, 2.0 * math.pi) - math.pi
-        
-        
+
         # move singularity
         if beta > 0:
             beta = math.pi - beta
@@ -113,22 +107,22 @@ class ControllerProgram():
         # a target position has been reached
         if distance < self.DISTANCE_TOLERANCE:
             index_char = "th"
-            if current_target_index == 0:
+            if self.current_target_index == 0:
                 index_char = "st"
-            elif current_target_index == 1:
+            elif self.current_target_index == 1:
                 index_char = "nd"
-            elif current_target_index == 2:
+            elif self.current_target_index == 2:
                 index_char = "rd"
-            rospy.loginfo(f"{current_target_index + 1}{index_char} target reached. {current_target_index}\n")
-            current_target_index += 1
-            current_target_index %= self.TARGET_POINTS_SIZE
+            rospy.loginfo(f"{self.current_target_index + 1}{index_char} target reached. {self.current_target_index}\n")
+            self.current_target_index += 1
+            self.current_target_index %= self.TARGET_POINTS_SIZE
         else:
             self.speeds[0] = self.MAX_SPEED - math.pi + self.TURN_COEFFICIENT * beta
             self.speeds[1] = self.MAX_SPEED - math.pi - self.TURN_COEFFICIENT * beta
             
         
         self.robot_set_speed(self.speeds[0], self.speeds[1])
-        if current_target_index > len(self.traverse_path)-1:
+        if self.current_target_index > len(self.traverse_path)-1:
             self.robot_set_speed(0, 0)
             self.AUTOPILOT = False
         pass
@@ -156,8 +150,8 @@ class ControllerProgram():
                 self.AUTOPILOT = False
 
             elif key == self.keyboard.LEFT:
-                speeds[LEFT] = -self.MAX_SPEED;
-                speeds[RIGHT] = self.MAX_SPEED;
+                speeds[LEFT] = -self.MAX_SPEED
+                speeds[RIGHT] = self.MAX_SPEED
                 self.AUTOPILOT = False
 
             elif key == 'A':
@@ -175,7 +169,7 @@ class ControllerProgram():
         self.old_key = key
 
     def start(self):
-        while True:
+        while self.robot.step(self.timestep) != -1:
             self.check_keyboard()
             if self.AUTOPILOT:
                 self.autopilot_mode()
@@ -197,7 +191,7 @@ class ROSInterface():
 
 try:
     talker = ROSInterface("chatter", "talker")
-    talker.start_node()
-    robot_controller = ControllerProgram()
+    robot_controller = ControllerProgram(talker)
+    robot_controller.start()
 except rospy.ROSInterruptException:
     pass
